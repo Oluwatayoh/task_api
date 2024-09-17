@@ -76,23 +76,35 @@ def get_mac(ip):
     
     return answered_list[0][1].hwsrc if answered_list else None
 
-# Sniff network packets and display activity (DNS and HTTP)
+# Sniff network packets and display activity (DNS and HTTP, including POST payloads)
 def log_device_traffic(selected_device_ip):
     print(f"Logging traffic from {selected_device_ip}...")
 
     def packet_callback(packet):
+        # DNS request logging
         if packet.haslayer(DNS) and packet.haslayer(DNSQR):
             dns_query = packet[DNSQR].qname.decode('utf-8')
             print(f"[DNS] {packet[IP].src} queried {dns_query}")
         
+        # HTTP traffic logging (GET/POST and payload if POST)
         elif packet.haslayer(TCP) and packet.haslayer(Raw):
             payload = packet[Raw].load.decode(errors="ignore")
-            if "Host:" in payload:
+            
+            # Check for HTTP request methods
+            if payload.startswith('GET') or payload.startswith('POST') or payload.startswith('PUT') or payload.startswith('DELETE'):
+                request_type = payload.split(' ')[0]
                 host_line = [line for line in payload.splitlines() if "Host:" in line]
                 if host_line:
                     host = host_line[0].split(" ")[1]
-                    print(f"[HTTP] {packet[IP].src} visited {host}")
-
+                    print(f"[HTTP] {packet[IP].src} made a {request_type} request to {host}")
+                
+                # If POST, display the payload
+                if request_type == 'POST':
+                    # Extract the payload body (after empty line separating headers and body)
+                    body = payload.split('\r\n\r\n')[-1]
+                    if body:
+                        print(f"[POST Payload] {body}")
+    
     sniff(filter=f"ip src {selected_device_ip}", prn=packet_callback, store=False)
 
 # Automatically get the gateway IP using netifaces
